@@ -1,5 +1,5 @@
 import sys
-from PyQt5.QtWidgets import QApplication, QMainWindow, QMenuBar, QAction, QVBoxLayout, QWidget, QLabel, QFrame
+from PyQt5.QtWidgets import QApplication, QMainWindow, QMenuBar, QAction, QVBoxLayout, QWidget, QLabel, QFrame, QFileDialog
 from PyQt5.QtGui import QFont
 import pandas as pd
 import numpy as np
@@ -91,12 +91,18 @@ class MainWindow(QMainWindow):
             if isinstance(widget, FigureCanvas):
                 widget.deleteLater()
 
-    def process_cloudiness_data(self):
-        """Обработка данных по облачности и отрисовка графика."""
-        data = pd.read_csv('obl.txt', sep=";",
-                           names=['kod', 'year', 'cloud_type', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug',
-                                  'Sep', 'Oct', 'Nov', 'Dec'])
+    def select_file(self, file_filter="CSV Files (*.csv *.txt)"):
+        """Открытие диалогового окна для выбора файла."""
+        options = QFileDialog.Options()
+        file_path, _ = QFileDialog.getOpenFileName(self, "Выберите файл данных", "", file_filter, options=options)
+        return file_path if file_path else None
 
+    def process_cloudiness_data(self):
+        file_path = self.select_file()
+        if not file_path:
+            return
+
+        data = pd.read_csv(file_path, sep=";", names=['kod', 'year', 'cloud_type', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'])
         # Фильтрация данных
         for month in ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']:
             data = data.loc[data[month] != 9999]
@@ -142,10 +148,11 @@ class MainWindow(QMainWindow):
         self.graph_frame.layout.addWidget(canvas)
 
     def process_wind_rose_data(self):
-        """Обработка данных для построения розы ветров."""
-        wind_data = pd.read_csv("wind_rose.txt", sep=";",
-                                names=['kod', 'year', 'month', 'day', 'hour', 'rumb', 'V_sr', 'V_max'])
+        file_path = self.select_file()
+        if not file_path:
+            return
 
+        wind_data = pd.read_csv(file_path, sep=";", names=['kod', 'year', 'month', 'day', 'hour', 'rumb', 'V_sr', 'V_max'])
         wind_data['rumb'] = pd.to_numeric(wind_data['rumb'], errors='coerce')
         wind_data = wind_data.dropna(subset=['rumb'])
         wind_data = wind_data[wind_data['rumb'] != 0]
@@ -207,8 +214,11 @@ class MainWindow(QMainWindow):
         self.graph_frame.layout.addWidget(canvas)
 
     def process_temperature_data(self):
+        file_path = self.select_file()
+        if not file_path:
+            return
         """Обработка данных по температуре и отрисовка графика."""
-        temp_osadki = pd.read_csv("temp_osad.txt", sep=";",
+        temp_osadki = pd.read_csv(file_path, sep=";",
                                   names=['kod', 'year', 'month', 'day', 'prizn', 'T_min', 'T_sr', 'T_max', 'H_mm'])
 
         temp_osadki['T_min'] = pd.to_numeric(temp_osadki['T_min'], errors='coerce')
@@ -251,17 +261,21 @@ class MainWindow(QMainWindow):
         self.graph_frame.layout.addWidget(canvas)
 
     def process_precipitation_data(self):
+        file_path = self.select_file()
+        if not file_path:
+            return
         """Обработка данных по осадкам и отрисовка графика."""
-        temp_osadki = pd.read_csv("temp_osad.txt", sep=";",
+        temp_osadki = pd.read_csv(file_path, sep=";",
                                   names=['kod', 'year', 'month', 'day', 'prizn', 'T_min', 'T_sr', 'T_max', 'H_mm'])
 
         osadki_poln = temp_osadki[['year', 'month', 'day', 'H_mm']].copy()
-        osadki_poln.loc[:, 'H_mm'] = pd.to_numeric(osadki_poln['H_mm'], errors='coerce')
+        osadki_poln['H_mm'] = pd.to_numeric(osadki_poln['H_mm'], errors='coerce')
         osadki = osadki_poln.dropna(subset=['H_mm'])
-        osadki = osadki[osadki['H_mm'] != 0]
+        osadki = osadki[osadki['H_mm'] != 0.0]
 
         osadki_sort = osadki.sort_values(by=['H_mm'], ascending=False)
         osadki_no_dup = osadki_sort.drop_duplicates(subset=['H_mm']).reset_index(drop=True)
+
         osadki_no_dup['numer'] = osadki_no_dup.index + 1
         osadki_no_dup['P%'] = osadki_no_dup['numer'] / (len(osadki_no_dup) + 1) * 100
 
@@ -292,10 +306,15 @@ class MainWindow(QMainWindow):
         self.graph_frame.layout.addWidget(canvas)
 
     def process_snow_data(self):
-        """Обработка данных по снежному покрову и отрисовка графика."""
-        snow = pd.read_csv("snow_kosh.txt", sep=";", names=['kod', 'year', 'month', 'day', 'hsnow'])
+        file_path = self.select_file()
+        if not file_path:
+            return
+
+        # Чтение данных
+        snow = pd.read_csv(file_path, sep=";", names=['kod', 'year', 'month', 'day', 'hsnow'])
         del snow['kod']
 
+        # Фильтрация данных
         snow = snow.loc[snow['hsnow'] != 9999]
         snow = snow.loc[snow['hsnow'] != 0]
         snow_sort = snow.sort_values(by=['hsnow'], ascending=False, inplace=False)
@@ -305,36 +324,47 @@ class MainWindow(QMainWindow):
         snow_sort['P%'] = snow_sort['P'] * 100
 
         try:
+            # Подгонка распределения Пирсона III
             a1, loc1, scale1 = sts.pearson3.fit(snow_sort['hsnow'])
             print(f"Параметры распределения Пирсона III: a={a1}, loc={loc1}, scale={scale1}")
         except Exception as e:
             print(f"Ошибка при подборе распределения Пирсона III: {e}")
             raise
 
+        # Создание объекта распределения Пирсона III
         pear = sts.pearson3(a1, loc1, scale1)
+
+        # Вычисление нормированной вероятности для эмпирических данных
         f1_x = pear.cdf(snow_sort['hsnow'])
         snow_sort['F_inv'] = sts.norm.ppf(1 - f1_x)
 
+        # Генерация точек для теоретической кривой
+        x_theory = np.linspace(min(snow_sort['F_inv']), max(snow_sort['F_inv']), 100)
+        y_theory = sts.pearson3.ppf(1 - sts.norm.cdf(x_theory), a1, loc1, scale1)
+
+        # Создание графика
         fig, ax = plt.subplots(figsize=(8, 5))
-        ax.plot(snow_sort['P%'], snow_sort['hsnow'], '+', label='Эмпирические точки')
-        ax.plot(snow_sort['P%'], sts.pearson3.ppf(1 - sts.norm.cdf(snow_sort['F_inv']), a1, loc1, scale1), label='Теоретическая кривая')
-        ax.set_xlabel("Вероятность %", fontsize=10)
+        ax.plot(snow_sort['F_inv'], snow_sort['hsnow'], '+', label='Эмпирические точки')
+        ax.plot(x_theory, y_theory, '-', color='red', label='Теоретическая кривая')
+        ax.set_xlabel("Нормированная вероятность", fontsize=10)
         ax.set_ylabel("Высота снега, см", fontsize=10)
-        ax.set_xlim(0, 100)
-        ax.set_ylim(0, 50)
-        ax.set_xticks(np.arange(0.0, 105, 5.0))
-        ax.set_yticks(np.arange(math.trunc(min(snow_sort['hsnow'])), 50, 5))
+        ax.set_xlim(min(snow_sort['F_inv']), max(snow_sort['F_inv']))
+        ax.set_ylim(0, max(snow_sort['hsnow']) * 1.1)
         ax.legend()
         ax.grid(True)
         ax.set_title("Распределение высоты снежного покрова", fontsize=12)
 
+        # Встраивание графика в PyQt5
         canvas = FigureCanvas(fig)
         self.graph_frame.layout = QVBoxLayout(self.graph_frame)
         self.graph_frame.layout.addWidget(canvas)
 
     def plot_temperature_grid(self):
+        file_path = self.select_file()
+        if not file_path:
+            return
         """Построение вероятностной сетки для температуры."""
-        temp_osadki = pd.read_csv("temp_osad.txt", sep=";",
+        temp_osadki = pd.read_csv(file_path, sep=";",
                                   names=['kod', 'year', 'month', 'day', 'prizn', 'T_min', 'T_sr', 'T_max', 'H_mm'])
 
         temp_osadki['T_min'] = pd.to_numeric(temp_osadki['T_min'], errors='coerce')
@@ -377,12 +407,15 @@ class MainWindow(QMainWindow):
         self.graph_frame.layout.addWidget(canvas)
 
     def plot_precipitation_grid(self):
+        file_path = self.select_file()
+        if not file_path:
+            return
         """Построение вероятностной сетки для осадков."""
-        temp_osadki = pd.read_csv("temp_osad.txt", sep=";",
+        temp_osadki = pd.read_csv(file_path, sep=";",
                                   names=['kod', 'year', 'month', 'day', 'prizn', 'T_min', 'T_sr', 'T_max', 'H_mm'])
 
         osadki_poln = temp_osadki[['year', 'month', 'day', 'H_mm']].copy()
-        osadki_poln.loc[:, 'H_mm'] = pd.to_numeric(osadki_poln['H_mm'], errors='coerce')
+        osadki_poln['H_mm'] = pd.to_numeric(osadki_poln['H_mm'], errors='coerce')
         osadki = osadki_poln.dropna(subset=['H_mm'])
         osadki = osadki[osadki['H_mm'] != 0]
 
@@ -420,8 +453,11 @@ class MainWindow(QMainWindow):
         self.graph_frame.layout.addWidget(canvas)
 
     def plot_snow_grid(self):
+        file_path = self.select_file()
+        if not file_path:
+            return
         """Построение вероятностной сетки для снежного покрова."""
-        snow = pd.read_csv("snow_kosh.txt", sep=";", names=['kod', 'year', 'month', 'day', 'hsnow'])
+        snow = pd.read_csv(file_path, sep=";", names=['kod', 'year', 'month', 'day', 'hsnow'])
         del snow['kod']
 
         snow = snow.loc[snow['hsnow'] != 9999]
@@ -459,7 +495,6 @@ class MainWindow(QMainWindow):
         canvas = FigureCanvas(fig)
         self.graph_frame.layout = QVBoxLayout(self.graph_frame)
         self.graph_frame.layout.addWidget(canvas)
-
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
